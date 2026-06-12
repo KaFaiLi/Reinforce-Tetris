@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reinforce-Tetris — Agent Viewer</title>
+<style>
+  :root {
+    --bg: #0f1218; --panel: #181d27; --border: #2a3142;
+    --text: #e6e9f0; --dim: #8b93a7; --accent: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 22px; border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 17px; margin: 0; }
+  header .ckpt { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  select, button, input[type=number] {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer;
+  }
+  select { max-width: 320px; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #0c1310; border: none; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  main { display: flex; gap: 22px; padding: 22px; flex-wrap: wrap; }
+  .board-wrap { position: relative; }
+  canvas { background: #0a0d12; border: 1px solid var(--border); border-radius: 6px; display: block; }
+  .overlay {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(10,13,18,.78); border-radius: 6px; font-size: 20px; font-weight: 700;
+    flex-direction: column; gap: 8px; text-align: center;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; min-width: 260px;
+  }
+  .col { display: flex; flex-direction: column; gap: 16px; width: 320px; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+              color: var(--dim); margin: 0 0 10px; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+  .stats .k { color: var(--dim); }
+  .stats .v { text-align: right; font-variant-numeric: tabular-nums; }
+  .stats .big { font-size: 20px; font-weight: 700; color: var(--accent); }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .controls label { color: var(--dim); font-size: 12px; }
+  input[type=range] { width: 110px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 3px 6px; }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; border-bottom: 1px solid var(--border); }
+  td:first-child, th:first-child { text-align: left; }
+  #nextCanvas { background: transparent; border: none; }
+  .bench-result { margin-top: 10px; }
+  .muted { color: var(--dim); font-size: 12px; }
+  .checkrow { display:flex; align-items:center; gap:6px; color: var(--dim); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧠 Reinforce-Tetris — Agent Viewer</h1>
+  <div class="ckpt">
+    <span class="muted">checkpoint</span>
+    <select id="ckptSelect"></select>
+    <button id="loadBtn">Load</button>
+  </div>
+</header>
+
+<main>
+  <div class="board-wrap">
+    <canvas id="board" width="300" height="600"></canvas>
+    <div class="overlay" id="overlay">
+      <div id="overlayTitle">GAME OVER</div>
+      <div class="muted" id="overlaySub"></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="panel">
+      <h2>Controls</h2>
+      <div class="controls">
+        <button class="primary" id="playBtn">▶ Play</button>
+        <button id="stepBtn">Step</button>
+        <button id="resetBtn">Reset</button>
+      </div>
+      <div class="controls" style="margin-top:10px">
+        <label>speed</label>
+        <input type="range" id="speed" min="1" max="20" value="5">
+        <span class="muted" id="speedLabel">5 pieces/s</span>
+      </div>
+      <div class="checkrow" style="margin-top:8px">
+        <input type="checkbox" id="autoRestart" checked>
+        <label for="autoRestart">auto-restart on game over</label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Current game</h2>
+      <div class="stats">
+        <span class="k">score</span><span class="v big" id="score">0</span>
+        <span class="k">lines</span><span class="v" id="lines">0</span>
+        <span class="k">level</span><span class="v" id="level">0</span>
+        <span class="k">pieces</span><span class="v" id="pieces">0</span>
+        <span class="k">state value</span><span class="v" id="value">–</span>
+        <span class="k">candidates</span><span class="v" id="cands">–</span>
+        <span class="k">next piece</span>
+        <span class="v"><canvas id="nextCanvas" width="64" height="32"></canvas></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Finished episodes (this session)</h2>
+      <table id="historyTable">
+        <thead><tr><th>#</th><th>score</th><th>lines</th><th>pieces</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="muted" id="historyEmpty">none yet</div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="panel">
+      <h2>Benchmark (headless, greedy)</h2>
+      <div class="controls">
+        <label>episodes</label>
+        <input type="number" id="benchEpisodes" value="5" min="1" max="50" style="width:64px">
+        <label>max pieces</label>
+        <input type="number" id="benchPieces" value="500" min="50" max="5000" style="width:80px">
+      </div>
+      <div class="controls" style="margin-top:10px">
+        <button class="primary" id="benchBtn">Run benchmark</button>
+        <span class="muted" id="benchStatus"></span>
+      </div>
+      <div class="bench-result" id="benchResult"></div>
+    </div>
+    <div class="panel">
+      <h2>How to read this</h2>
+      <div class="muted">
+        The agent picks among every legal (rotation, column) drop of the current
+        piece by scoring each resulting board with its value network.
+        <b>state value</b> is the network's estimate for the placement it chose —
+        higher means the agent expects a better future. An episode capped by
+        “max pieces” without game over means the agent survived the whole cap.
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const COLS = 10, ROWS = 20, CELL = 30;
+const COLORS = {1:"#22d3ee",2:"#facc15",3:"#c084fc",4:"#4ade80",5:"#f87171",6:"#60a5fa",7:"#fb923c"};
+const ctx = document.getElementById("board").getContext("2d");
+const nextCtx = document.getElementById("nextCanvas").getContext("2d");
+const $ = id => document.getElementById(id);
+
+let playing = false, busy = false, history = [];
+
+function drawCell(c, r, col, ctx2 = ctx, size = CELL) {
+  ctx2.fillStyle = col;
+  ctx2.fillRect(c * size + 1, r * size + 1, size - 2, size - 2);
+  ctx2.fillStyle = "rgba(255,255,255,.18)";
+  ctx2.fillRect(c * size + 1, r * size + 1, size - 2, 4);
+}
+
+function drawBoard(board, ghost) {
+  ctx.clearRect(0, 0, COLS * CELL, ROWS * CELL);
+  ctx.strokeStyle = "#161b25";
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++) {
+      ctx.strokeRect(c * CELL + .5, r * CELL + .5, CELL - 1, CELL - 1);
+      if (board[r][c]) drawCell(c, r, COLORS[board[r][c]]);
+    }
+  if (ghost) for (const [dr, dc] of ghost.cells)
+    drawCell(ghost.col + dc, ghost.row + dr, COLORS[ghost.id]);
+}
+
+function drawNext(piece) {
+  nextCtx.clearRect(0, 0, 64, 32);
+  if (!piece) return;
+  for (const [r, c] of piece.cells) drawCell(c, r, COLORS[piece.id], nextCtx, 15);
+}
+
+function updateStats(d) {
+  $("score").textContent = d.score ?? 0;
+  $("lines").textContent = d.lines ?? 0;
+  $("level").textContent = d.level ?? 0;
+  $("pieces").textContent = d.pieces ?? 0;
+  if (d.value !== undefined) $("value").textContent = d.value.toFixed(1);
+  if (d.num_candidates !== undefined) $("cands").textContent = d.num_candidates;
+  drawNext(d.next);
+}
+
+function renderHistory() {
+  const tbody = $("historyTable").querySelector("tbody");
+  tbody.innerHTML = "";
+  history.slice(-10).reverse().forEach((e, i) => {
+    const n = history.length - i;
+    tbody.insertAdjacentHTML("beforeend",
+      `<tr><td>${n}</td><td>${e.score}</td><td>${e.lines}</td><td>${e.pieces}</td></tr>`);
+  });
+  $("historyEmpty").style.display = history.length ? "none" : "block";
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const speedVal = () => +$("speed").value;
+
+async function animateStep(d) {
+  const animate = speedVal() <= 8;
+  if (animate && d.piece) {
+    const rowsPerFrame = 2, frameMs = 16;
+    for (let r = 0; r <= d.piece.row; r += rowsPerFrame) {
+      drawBoard(d.board_before, {...d.piece, row: Math.min(r, d.piece.row)});
+      await sleep(frameMs);
+    }
+  }
+  drawBoard(d.board_placed || d.board);
+  if (animate && d.cleared_rows && d.cleared_rows.length) {
+    await sleep(60);
+    ctx.fillStyle = "rgba(255,255,255,.85)";
+    for (const r of d.cleared_rows) ctx.fillRect(0, r * CELL, COLS * CELL, CELL);
+    await sleep(90);
+  }
+  drawBoard(d.board);
+}
+
+async function stepOnce() {
+  if (busy) return;
+  busy = true;
+  try {
+    const res = await fetch("/api/step", {method: "POST"});
+    const d = await res.json();
+    if (d.error) { setOverlay(d.error, ""); playing = false; syncPlayBtn(); return; }
+    await animateStep(d);
+    updateStats(d);
+    if (d.history) { history = d.history; renderHistory(); }
+    if (d.done) {
+      if ($("autoRestart").checked && playing) {
+        await sleep(400);
+        await resetGame(true);
+      } else {
+        setOverlay("GAME OVER", `score ${d.score} · ${d.lines} lines · ${d.pieces} pieces`);
+        playing = false; syncPlayBtn();
+      }
+    }
+  } finally { busy = false; }
+}
+
+async function runLoop() {
+  while (playing) {
+    const t0 = performance.now();
+    await stepOnce();
+    const wait = 1000 / speedVal() - (performance.now() - t0);
+    if (wait > 0) await sleep(wait);
+  }
+}
+
+function setOverlay(title, sub) {
+  $("overlayTitle").textContent = title;
+  $("overlaySub").textContent = sub;
+  $("overlay").style.display = title ? "flex" : "none";
+}
+
+function syncPlayBtn() {
+  $("playBtn").textContent = playing ? "⏸ Pause" : "▶ Play";
+}
+
+async function resetGame(keepPlaying) {
+  setOverlay("", "");
+  const res = await fetch("/api/reset", {method: "POST"});
+  const d = await res.json();
+  if (d.error) { setOverlay("No checkpoint", d.error); return; }
+  drawBoard(d.board);
+  updateStats(d);
+  if (!keepPlaying) { playing = false; syncPlayBtn(); }
+}
+
+async function loadState() {
+  const res = await fetch("/api/state");
+  const d = await res.json();
+  const sel = $("ckptSelect");
+  sel.innerHTML = "";
+  (d.checkpoints || []).forEach(p => {
+    const o = document.createElement("option");
+    o.value = o.textContent = p;
+    if (p === d.checkpoint) o.selected = true;
+    sel.appendChild(o);
+  });
+  if (!d.loaded) {
+    setOverlay("No checkpoint loaded",
+      (d.checkpoints || []).length ? "pick one above and press Load"
+                                   : "train one first: python train.py");
+    return;
+  }
+  drawBoard(d.board);
+  updateStats(d);
+}
+
+$("playBtn").onclick = () => { playing = !playing; syncPlayBtn(); if (playing) { setOverlay("", ""); runLoop(); } };
+$("stepBtn").onclick = () => { if (!playing) stepOnce(); };
+$("resetBtn").onclick = () => resetGame(false);
+$("speed").oninput = () => $("speedLabel").textContent = `${speedVal()} pieces/s`;
+$("loadBtn").onclick = async () => {
+  playing = false; syncPlayBtn();
+  const res = await fetch("/api/reset", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({checkpoint: $("ckptSelect").value}),
+  });
+  const d = await res.json();
+  if (d.error) { setOverlay("Load failed", d.error); return; }
+  setOverlay("", ""); drawBoard(d.board); updateStats(d);
+};
+
+$("benchBtn").onclick = async () => {
+  const res = await fetch("/api/benchmark/start", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({episodes: +$("benchEpisodes").value,
+                          max_pieces: +$("benchPieces").value}),
+  });
+  const d = await res.json();
+  if (!d.started) { $("benchStatus").textContent = "could not start"; return; }
+  $("benchBtn").disabled = true;
+  pollBenchmark();
+};
+
+async function pollBenchmark() {
+  const res = await fetch("/api/benchmark/status");
+  const d = await res.json();
+  $("benchStatus").textContent = d.running
+    ? `running… ${d.episodes.length}/${d.total}`
+    : (d.episodes.length ? "done" : "");
+  if (d.episodes.length) {
+    let rows = d.episodes.map((e, i) =>
+      `<tr><td>${i + 1}</td><td>${e.score}</td><td>${e.lines}</td><td>${e.pieces}</td>
+       <td>${e.topped_out ? "topped out" : "survived cap"}</td></tr>`).join("");
+    let summary = d.mean_score !== undefined
+      ? `<div style="margin-top:8px"><b>mean ${d.mean_score}</b> · max ${d.max_score} · ${d.mean_lines} lines avg</div>`
+      : "";
+    $("benchResult").innerHTML =
+      `<table><thead><tr><th>#</th><th>score</th><th>lines</th><th>pieces</th><th>end</th></tr></thead>
+       <tbody>${rows}</tbody></table>${summary}`;
+  }
+  if (d.running) setTimeout(pollBenchmark, 600);
+  else $("benchBtn").disabled = false;
+}
+
+loadState();
+</script>
+</body>
+</html>

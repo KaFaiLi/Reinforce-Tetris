@@ -30,7 +30,32 @@ Progress is printed every 500 steps; per-episode results land in
 Useful flags: `--gamma`, `--lr`, `--eps-decay-frac`, `--buffer-size`
 (see `python train.py --help`).
 
-## Evaluate / watch the agent
+## Web UI — watch & validate the model
+
+```bash
+python serve.py            # auto-loads the newest checkpoint (models/pretrained.pt ships with the repo)
+# open http://localhost:8000
+```
+
+![Agent viewer](docs/ui.png)
+
+The browser viewer lets you validate model performance directly:
+
+- **Live play** with drop animation, speed slider (1–20 pieces/s), play/pause/
+  single-step/reset, and auto-restart.
+- **Decision insight**: the network's value estimate for each chosen placement
+  and the number of candidate placements it picked from.
+- **Episode history** of every finished game in the session.
+- **Benchmark button**: runs N greedy headless episodes server-side and reports
+  per-episode score/lines plus mean/max — a quick quantitative check to go with
+  the visual one.
+- **Checkpoint dropdown** to hot-swap any `.pt` under `runs/` or `models/` and
+  compare training stages.
+
+A pretrained checkpoint (`models/pretrained.pt`, 18k pieces of training) is
+included so the UI works immediately after cloning.
+
+## Evaluate / watch the agent (terminal)
 
 ```bash
 python evaluate.py --checkpoint runs/latest/best.pt --episodes 5
