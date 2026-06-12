@@ -1,7 +1,8 @@
 # Reinforce-Tetris
 
 A standard Tetris game plus a reinforcement-learning pipeline that trains an
-agent to score, using parallel environment workers.
+agent to score, using parallel environment workers. Also includes a Snake
+game with its own DQN agent trained the same way (see [Snake](#snake)).
 
 ## Setup
 
@@ -86,6 +87,35 @@ own game and compute candidate features (numpy only). Every global step the
 main process batches *all* candidates from *all* workers through one forward
 pass, picks per-environment actions, and sends them back over pipes —
 SubprocVecEnv-style synchronous parallel rollout with a single shared network.
+
+## Snake
+
+The same recipe applied to Snake, in `snake_rl/`:
+
+![Snake agent viewer](docs/snake_ui.png)
+
+```bash
+python play_snake.py                                # play yourself (curses)
+python train_snake.py --workers 4 --total-steps 400000   # train
+python evaluate_snake.py --checkpoint runs/snake/best.pt  # headless eval
+python serve.py                                     # web UI: open /snake
+```
+
+- **Game** (`snake_rl/game.py`): classic Snake on a 12×12 grid — eat food,
+  grow, die on walls/yourself, reversing is ignored.
+- **Environment** (`snake_rl/env.py`): the classic compact state — 11 features
+  (danger straight/right/left, direction one-hot, food direction) and 3
+  relative actions (straight / turn right / turn left). Reward +10 for food,
+  −10 for dying or starving past a hunger limit (prevents infinite loops).
+- **Learning** (`train_snake.py`): standard DQN — Q-network with a target
+  network, epsilon-greedy exploration, replay buffer — using the same
+  parallel-worker design as Tetris (`snake_rl/vec_env.py`): workers simulate,
+  the main process batches all states through one forward pass per step.
+- **Web UI**: `python serve.py` then open http://localhost:8000/snake for live
+  play with Q-value readout, episode history, benchmark button and checkpoint
+  hot-swap. A pretrained model (`models/snake_pretrained.pt`) ships with the
+  repo; it averages ~18–21 food per game (max ~32, snake length 35 on a
+  144-cell board).
 
 ## Tests
 

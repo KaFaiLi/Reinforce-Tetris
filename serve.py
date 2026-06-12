@@ -21,6 +21,8 @@ import numpy as np
 import torch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from snake_rl.env import SnakeEnv
+from snake_rl.model import load_checkpoint as load_snake_checkpoint
 from tetris_rl.env import TetrisPlacementEnv
 from tetris_rl.game import PIECE_IDS, PIECE_ROTATIONS
 from tetris_rl.model import load_checkpoint
@@ -28,9 +30,17 @@ from tetris_rl.model import load_checkpoint
 WEBUI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webui")
 
 
-def find_checkpoints() -> list[str]:
+def _all_checkpoints() -> list[str]:
     paths = glob.glob("runs/**/*.pt", recursive=True) + glob.glob("models/*.pt")
     return sorted(set(paths), key=os.path.getmtime, reverse=True)
+
+
+def find_checkpoints() -> list[str]:
+    return [p for p in _all_checkpoints() if "snake" not in p.lower()]
+
+
+def find_snake_checkpoints() -> list[str]:
+    return [p for p in _all_checkpoints() if "snake" in p.lower()]
 
 
 def _piece_json(name: str, rotation: int = 0) -> dict:
@@ -183,7 +193,119 @@ class AgentSession:
             return status
 
 
+class SnakeSession:
+    """Single shared Snake game driven by the loaded Q-network."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.model = None
+        self.checkpoint: str | None = None
+        self.env: SnakeEnv | None = None
+        self.history: list[dict] = []
+        self.benchmark = {"running": False, "episodes": [], "total": 0}
+
+    def load(self, path: str) -> None:
+        model, _ = load_snake_checkpoint(path)
+        with self.lock:
+            self.model = model
+            self.checkpoint = path
+            self._reset_locked()
+
+    def _reset_locked(self) -> None:
+        self.env = SnakeEnv(seed=random.randrange(1_000_000))
+        self.env.reset()
+
+    def reset(self) -> dict:
+        with self.lock:
+            self._reset_locked()
+            return self._state_locked()
+
+    def _state_locked(self) -> dict:
+        game = self.env.game
+        return {
+            "loaded": self.model is not None,
+            "checkpoint": self.checkpoint,
+            "width": game.width,
+            "height": game.height,
+            "snake": list(game.snake),
+            "food": game.food,
+            "score": game.score,
+            "steps": game.steps,
+            "length": len(game.snake),
+            "done": game.game_over,
+            "won": game.won,
+        }
+
+    def state(self) -> dict:
+        with self.lock:
+            if self.env is None:
+                return {"loaded": False, "checkpoint": None}
+            return self._state_locked()
+
+    def step(self) -> dict:
+        with self.lock:
+            env = self.env
+            if env.game.game_over:
+                return self._state_locked()
+            features = env.state()
+            with torch.no_grad():
+                q = self.model(torch.from_numpy(features)).numpy()
+            action = int(q.argmax())
+            reward, done, info = env.step(action)
+            if done:
+                self.history.append({"score": info["score"], "steps": info["steps"]})
+            return {
+                **self._state_locked(),
+                "ate": reward > 0,
+                "q_value": round(float(q[action]), 2),
+                "q_values": [round(float(v), 2) for v in q],
+                "history": self.history[-20:],
+            }
+
+    def start_benchmark(self, episodes: int) -> bool:
+        with self.lock:
+            if self.model is None or self.benchmark["running"]:
+                return False
+            self.benchmark = {"running": True, "episodes": [], "total": episodes}
+        threading.Thread(target=self._run_benchmark, args=(episodes,),
+                         daemon=True).start()
+        return True
+
+    def _run_benchmark(self, episodes: int) -> None:
+        for ep in range(episodes):
+            env = SnakeEnv(seed=2000 + ep)
+            state = env.reset()
+            done = False
+            info = {"score": 0, "steps": 0}
+            while not done:  # the hunger limit bounds every episode
+                with torch.no_grad():
+                    q = self.model(torch.from_numpy(state))
+                _, done, info = env.step(int(q.argmax()))
+                if not done:
+                    state = env.state()
+            with self.lock:
+                self.benchmark["episodes"].append(
+                    {"score": info["score"], "steps": info["steps"]}
+                )
+        with self.lock:
+            self.benchmark["running"] = False
+
+    def benchmark_status(self) -> dict:
+        with self.lock:
+            status = {**self.benchmark}
+            eps = status["episodes"]
+            if eps:
+                scores = [e["score"] for e in eps]
+                status["mean_score"] = round(float(np.mean(scores)), 1)
+                status["max_score"] = max(scores)
+                status["mean_steps"] = round(
+                    float(np.mean([e["steps"] for e in eps])), 0
+                )
+            return status
+
+
 SESSION = AgentSession()
+SNAKE = SnakeSession()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -207,21 +329,30 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return {}
 
+    def _html(self, filename: str) -> None:
+        with open(os.path.join(WEBUI_DIR, filename), "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         if self.path in ("/", "/index.html"):
-            with open(os.path.join(WEBUI_DIR, "index.html"), "rb") as f:
-                body = f.read()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._html("index.html")
+        elif self.path in ("/snake", "/snake.html"):
+            self._html("snake.html")
         elif self.path == "/api/state":
             self._json({**SESSION.state(), "checkpoints": find_checkpoints()})
         elif self.path == "/api/checkpoints":
             self._json({"checkpoints": find_checkpoints()})
         elif self.path == "/api/benchmark/status":
             self._json(SESSION.benchmark_status())
+        elif self.path == "/api/snake/state":
+            self._json({**SNAKE.state(), "checkpoints": find_snake_checkpoints()})
+        elif self.path == "/api/snake/benchmark/status":
+            self._json(SNAKE.benchmark_status())
         else:
             self._json({"error": "not found"}, 404)
 
@@ -250,6 +381,28 @@ class Handler(BaseHTTPRequestHandler):
                 max_pieces = max(50, min(int(body.get("max_pieces", 500)), 5000))
                 ok = SESSION.start_benchmark(episodes, max_pieces)
                 self._json({"started": ok})
+            elif self.path == "/api/snake/reset":
+                body = self._body()
+                checkpoint = body.get("checkpoint")
+                if checkpoint:
+                    if checkpoint not in find_snake_checkpoints():
+                        self._json({"error": "unknown checkpoint"}, 400)
+                        return
+                    SNAKE.load(checkpoint)
+                if SNAKE.model is None:
+                    self._json({"error": "no checkpoint loaded"}, 400)
+                    return
+                self._json(SNAKE.reset())
+            elif self.path == "/api/snake/step":
+                if SNAKE.model is None:
+                    self._json({"error": "no checkpoint loaded"}, 400)
+                    return
+                self._json(SNAKE.step())
+            elif self.path == "/api/snake/benchmark/start":
+                body = self._body()
+                episodes = max(1, min(int(body.get("episodes", 10)), 100))
+                ok = SNAKE.start_benchmark(episodes)
+                self._json({"started": ok})
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as exc:  # surface errors to the UI instead of dying
@@ -270,12 +423,20 @@ def main() -> None:
         checkpoint = found[0] if found else None
     if checkpoint:
         SESSION.load(checkpoint)
-        print(f"loaded checkpoint {checkpoint}")
+        print(f"loaded tetris checkpoint {checkpoint}")
     else:
-        print("no checkpoint found - train one or pick from the UI once available")
+        print("no tetris checkpoint found - train one or pick from the UI")
+
+    snake_found = find_snake_checkpoints()
+    if snake_found:
+        SNAKE.load(snake_found[0])
+        print(f"loaded snake checkpoint {snake_found[0]}")
+    else:
+        print("no snake checkpoint found - train one with train_snake.py")
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Tetris agent UI on http://{args.host}:{args.port}")
+    print(f"Agent UI on http://{args.host}:{args.port}  "
+          f"(Tetris: /  Snake: /snake)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
