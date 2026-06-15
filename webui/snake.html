@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reinforce-Tetris — Snake Agent Viewer</title>
+<style>
+  :root {
+    --bg: #0f1218; --panel: #181d27; --border: #2a3142;
+    --text: #e6e9f0; --dim: #8b93a7; --accent: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 22px; border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 17px; margin: 0; }
+  header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+  header .ckpt { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  select, button, input[type=number] {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer;
+  }
+  select { max-width: 320px; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #0c1310; border: none; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  main { display: flex; gap: 22px; padding: 22px; flex-wrap: wrap; }
+  .board-wrap { position: relative; }
+  canvas { background: #0a0d12; border: 1px solid var(--border); border-radius: 6px; display: block; }
+  .overlay {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(10,13,18,.78); border-radius: 6px; font-size: 20px; font-weight: 700;
+    flex-direction: column; gap: 8px; text-align: center;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; min-width: 260px;
+  }
+  .col { display: flex; flex-direction: column; gap: 16px; width: 320px; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+              color: var(--dim); margin: 0 0 10px; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+  .stats .k { color: var(--dim); }
+  .stats .v { text-align: right; font-variant-numeric: tabular-nums; }
+  .stats .big { font-size: 20px; font-weight: 700; color: var(--accent); }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .controls label { color: var(--dim); font-size: 12px; }
+  input[type=range] { width: 110px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 3px 6px; }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; border-bottom: 1px solid var(--border); }
+  td:first-child, th:first-child { text-align: left; }
+  .bench-result { margin-top: 10px; }
+  .muted { color: var(--dim); font-size: 12px; }
+  .checkrow { display:flex; align-items:center; gap:6px; color: var(--dim); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🐍 Reinforce-Tetris — Snake Agent Viewer</h1>
+  <a href="/">← Tetris agent</a>
+  <div class="ckpt">
+    <span class="muted">checkpoint</span>
+    <select id="ckptSelect"></select>
+    <button id="loadBtn">Load</button>
+  </div>
+</header>
+
+<main>
+  <div class="board-wrap">
+    <canvas id="board" width="432" height="432"></canvas>
+    <div class="overlay" id="overlay">
+      <div id="overlayTitle">GAME OVER</div>
+      <div class="muted" id="overlaySub"></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="panel">
+      <h2>Controls</h2>
+      <div class="controls">
+        <button class="primary" id="playBtn">▶ Play</button>
+        <button id="stepBtn">Step</button>
+        <button id="resetBtn">Reset</button>
+      </div>
+      <div class="controls" style="margin-top:10px">
+        <label>speed</label>
+        <input type="range" id="speed" min="2" max="40" value="12">
+        <span class="muted" id="speedLabel">12 steps/s</span>
+      </div>
+      <div class="checkrow" style="margin-top:8px">
+        <input type="checkbox" id="autoRestart" checked>
+        <label for="autoRestart">auto-restart on game over</label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Current game</h2>
+      <div class="stats">
+        <span class="k">food eaten</span><span class="v big" id="score">0</span>
+        <span class="k">snake length</span><span class="v" id="length">3</span>
+        <span class="k">steps</span><span class="v" id="steps">0</span>
+        <span class="k">Q (chosen)</span><span class="v" id="qval">–</span>
+        <span class="k">Q [↑ → ←]</span><span class="v" id="qall">–</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Finished episodes (this session)</h2>
+      <table id="historyTable">
+        <thead><tr><th>#</th><th>food</th><th>steps</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="muted" id="historyEmpty">none yet</div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="panel">
+      <h2>Benchmark (headless, greedy)</h2>
+      <div class="controls">
+        <label>episodes</label>
+        <input type="number" id="benchEpisodes" value="10" min="1" max="100" style="width:64px">
+        <button class="primary" id="benchBtn">Run benchmark</button>
+        <span class="muted" id="benchStatus"></span>
+      </div>
+      <div class="bench-result" id="benchResult"></div>
+    </div>
+    <div class="panel">
+      <h2>How to read this</h2>
+      <div class="muted">
+        Every step the agent sees 11 features (danger straight/right/left,
+        its direction, and where the food is) and picks one of three relative
+        actions: straight, turn right, turn left. <b>Q (chosen)</b> is the
+        network's value for the action it took; the triple shows all three.
+        Episodes end on collision or when the snake circles too long without
+        eating (hunger limit).
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const ctx = document.getElementById("board").getContext("2d");
+const $ = id => document.getElementById(id);
+
+let playing = false, busy = false, history = [];
+let gridW = 12, gridH = 12, cell = 36;
+
+function drawState(d) {
+  gridW = d.width || gridW; gridH = d.height || gridH;
+  cell = Math.floor(432 / Math.max(gridW, gridH));
+  ctx.clearRect(0, 0, 432, 432);
+  ctx.strokeStyle = "#161b25";
+  for (let r = 0; r < gridH; r++)
+    for (let c = 0; c < gridW; c++)
+      ctx.strokeRect(c * cell + .5, r * cell + .5, cell - 1, cell - 1);
+  if (d.food) {
+    const [fr, fc] = d.food;
+    ctx.fillStyle = "#f87171";
+    ctx.beginPath();
+    ctx.arc(fc * cell + cell / 2, fr * cell + cell / 2, cell * .32, 0, 7);
+    ctx.fill();
+  }
+  (d.snake || []).forEach(([r, c], i) => {
+    ctx.fillStyle = i === 0 ? "#86efac" : "#4ade80";
+    ctx.fillRect(c * cell + 2, r * cell + 2, cell - 4, cell - 4);
+    if (i === 0) {
+      ctx.fillStyle = "#0c1310";
+      ctx.fillRect(c * cell + cell * .3, r * cell + cell * .3, 3, 3);
+      ctx.fillRect(c * cell + cell * .6, r * cell + cell * .3, 3, 3);
+    }
+  });
+}
+
+function updateStats(d) {
+  $("score").textContent = d.score ?? 0;
+  $("length").textContent = d.length ?? 3;
+  $("steps").textContent = d.steps ?? 0;
+  if (d.q_value !== undefined) $("qval").textContent = d.q_value.toFixed(1);
+  if (d.q_values) $("qall").textContent = d.q_values.map(v => v.toFixed(0)).join(" / ");
+}
+
+function renderHistory() {
+  const tbody = $("historyTable").querySelector("tbody");
+  tbody.innerHTML = "";
+  history.slice(-10).reverse().forEach((e, i) => {
+    const n = history.length - i;
+    tbody.insertAdjacentHTML("beforeend",
+      `<tr><td>${n}</td><td>${e.score}</td><td>${e.steps}</td></tr>`);
+  });
+  $("historyEmpty").style.display = history.length ? "none" : "block";
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const speedVal = () => +$("speed").value;
+
+function setOverlay(title, sub) {
+  $("overlayTitle").textContent = title;
+  $("overlaySub").textContent = sub;
+  $("overlay").style.display = title ? "flex" : "none";
+}
+
+function syncPlayBtn() {
+  $("playBtn").textContent = playing ? "⏸ Pause" : "▶ Play";
+}
+
+async function stepOnce() {
+  if (busy) return;
+  busy = true;
+  try {
+    const res = await fetch("/api/snake/step", {method: "POST"});
+    const d = await res.json();
+    if (d.error) { setOverlay(d.error, ""); playing = false; syncPlayBtn(); return; }
+    drawState(d);
+    updateStats(d);
+    if (d.history) { history = d.history; renderHistory(); }
+    if (d.done) {
+      if ($("autoRestart").checked && playing) {
+        await sleep(400);
+        await resetGame(true);
+      } else {
+        setOverlay(d.won ? "BOARD CLEARED!" : "GAME OVER",
+                   `${d.score} food · ${d.steps} steps`);
+        playing = false; syncPlayBtn();
+      }
+    }
+  } finally { busy = false; }
+}
+
+async function runLoop() {
+  while (playing) {
+    const t0 = performance.now();
+    await stepOnce();
+    const wait = 1000 / speedVal() - (performance.now() - t0);
+    if (wait > 0) await sleep(wait);
+  }
+}
+
+async function resetGame(keepPlaying) {
+  setOverlay("", "");
+  const res = await fetch("/api/snake/reset", {method: "POST"});
+  const d = await res.json();
+  if (d.error) { setOverlay("No checkpoint", d.error); return; }
+  drawState(d);
+  updateStats(d);
+  if (!keepPlaying) { playing = false; syncPlayBtn(); }
+}
+
+async function loadState() {
+  const res = await fetch("/api/snake/state");
+  const d = await res.json();
+  const sel = $("ckptSelect");
+  sel.innerHTML = "";
+  (d.checkpoints || []).forEach(p => {
+    const o = document.createElement("option");
+    o.value = o.textContent = p;
+    if (p === d.checkpoint) o.selected = true;
+    sel.appendChild(o);
+  });
+  if (!d.loaded) {
+    setOverlay("No checkpoint loaded",
+      (d.checkpoints || []).length ? "pick one above and press Load"
+                                   : "train one first: python train_snake.py");
+    return;
+  }
+  drawState(d);
+  updateStats(d);
+}
+
+$("playBtn").onclick = () => { playing = !playing; syncPlayBtn(); if (playing) { setOverlay("", ""); runLoop(); } };
+$("stepBtn").onclick = () => { if (!playing) stepOnce(); };
+$("resetBtn").onclick = () => resetGame(false);
+$("speed").oninput = () => $("speedLabel").textContent = `${speedVal()} steps/s`;
+$("loadBtn").onclick = async () => {
+  playing = false; syncPlayBtn();
+  const res = await fetch("/api/snake/reset", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({checkpoint: $("ckptSelect").value}),
+  });
+  const d = await res.json();
+  if (d.error) { setOverlay("Load failed", d.error); return; }
+  setOverlay("", ""); drawState(d); updateStats(d);
+};
+
+$("benchBtn").onclick = async () => {
+  const res = await fetch("/api/snake/benchmark/start", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({episodes: +$("benchEpisodes").value}),
+  });
+  const d = await res.json();
+  if (!d.started) { $("benchStatus").textContent = "could not start"; return; }
+  $("benchBtn").disabled = true;
+  pollBenchmark();
+};
+
+async function pollBenchmark() {
+  const res = await fetch("/api/snake/benchmark/status");
+  const d = await res.json();
+  $("benchStatus").textContent = d.running
+    ? `running… ${d.episodes.length}/${d.total}`
+    : (d.episodes.length ? "done" : "");
+  if (d.episodes.length) {
+    let rows = d.episodes.map((e, i) =>
+      `<tr><td>${i + 1}</td><td>${e.score}</td><td>${e.steps}</td></tr>`).join("");
+    let summary = d.mean_score !== undefined
+      ? `<div style="margin-top:8px"><b>mean ${d.mean_score} food</b> · max ${d.max_score} · ${d.mean_steps} steps avg</div>`
+      : "";
+    $("benchResult").innerHTML =
+      `<table><thead><tr><th>#</th><th>food</th><th>steps</th></tr></thead>
+       <tbody>${rows}</tbody></table>${summary}`;
+  }
+  if (d.running) setTimeout(pollBenchmark, 600);
+  else $("benchBtn").disabled = false;
+}
+
+loadState();
+</script>
+</body>
+</html>
