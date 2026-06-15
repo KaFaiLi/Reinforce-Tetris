@@ -9,7 +9,7 @@ target network. Worker processes simulate the games; the main process picks
 actions for all of them in one batched forward pass per step.
 
 Usage:
-    python train_snake.py --workers 4 --total-steps 400000
+    uv run python -m games.snake.train --workers 4 --total-steps 400000
 """
 
 from __future__ import annotations
@@ -24,9 +24,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from snake_rl.model import QNet, save_checkpoint
-from snake_rl.replay import ReplayBuffer
-from snake_rl.vec_env import ParallelSnake
+from .model import QNet, save_checkpoint
+from .replay import ReplayBuffer
+from .vec_env import ParallelSnake
 
 
 def parse_args() -> argparse.Namespace:
@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
                    help="environment steps per worker")
     p.add_argument("--width", type=int, default=12)
     p.add_argument("--height", type=int, default=12)
-    p.add_argument("--gamma", type=float, default=0.9)
+    p.add_argument("--gamma", type=float, default=0.97)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--batch-size", type=int, default=512)
     p.add_argument("--buffer-size", type=int, default=100_000)
@@ -48,6 +48,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--eps-end", type=float, default=0.01)
     p.add_argument("--eps-decay-frac", type=float, default=0.3)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--device", type=str, default="auto",
+                   help="auto|cpu|cuda (auto falls back to cpu if no cuda)")
     p.add_argument("--out-dir", type=str, default="runs/snake")
     p.add_argument("--log-every", type=int, default=5_000)
     p.add_argument("--save-every", type=int, default=20_000)
@@ -60,8 +62,13 @@ def main() -> None:
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
 
-    model = QNet()
-    target = QNet()
+    device = torch.device(
+        "cuda" if (args.device in ("auto", "cuda") and torch.cuda.is_available())
+        else "cpu"
+    )
+    print(f"device: {device}", flush=True)
+    model = QNet().to(device)
+    target = QNet().to(device)
     target.load_state_dict(model.state_dict())
     target.eval()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -89,7 +96,7 @@ def main() -> None:
         eps = args.eps_start + (args.eps_end - args.eps_start) * min(1.0, step / decay_steps)
 
         with torch.no_grad():
-            q_values = model(torch.from_numpy(states)).numpy()
+            q_values = model(torch.from_numpy(states).to(device)).cpu().numpy()
         greedy = q_values.argmax(axis=1)
         explore = rng.random(args.workers) < eps
         actions = np.where(explore, rng.integers(0, 3, size=args.workers), greedy)
@@ -110,12 +117,12 @@ def main() -> None:
         if len(buffer) >= args.warmup:
             s, a, r, s2, d = buffer.sample(args.batch_size)
             with torch.no_grad():
-                next_q = target(torch.from_numpy(s2)).max(dim=1).values
-                targets = torch.from_numpy(r) + args.gamma * next_q * (
-                    1.0 - torch.from_numpy(d)
+                next_q = target(torch.from_numpy(s2).to(device)).max(dim=1).values
+                targets = torch.from_numpy(r).to(device) + args.gamma * next_q * (
+                    1.0 - torch.from_numpy(d).to(device)
                 )
-            q = model(torch.from_numpy(s)).gather(
-                1, torch.from_numpy(a).unsqueeze(1)
+            q = model(torch.from_numpy(s).to(device)).gather(
+                1, torch.from_numpy(a).to(device).unsqueeze(1)
             ).squeeze(1)
             loss = loss_fn(q, targets)
             optimizer.zero_grad()

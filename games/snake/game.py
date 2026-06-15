@@ -59,6 +59,30 @@ class SnakeGame:
         head = self.snake[0]
         return (head[0] + dr, head[1] + dc)
 
+    def free_space(self, start: tuple[int, int]) -> int:
+        """Reachable empty cells from ``start`` (flood fill, body = walls).
+
+        Used as a survival feature: a move into a pocket smaller than the
+        snake is a self-trap. ``start`` itself counts; off-board/body -> 0.
+        ponytail: body treated as obstacle (ignores tail vacating) -> slightly
+        conservative, good enough; refine with tail-aware fill if it under-counts.
+        """
+        r0, c0 = start
+        body = set(self.snake)
+        if start in body or not (0 <= r0 < self.height and 0 <= c0 < self.width):
+            return 0
+        seen = {start}
+        stack = [start]
+        while stack:
+            r, c = stack.pop()
+            for dr, dc in DIRECTIONS:
+                cell = (r + dr, c + dc)
+                if (0 <= cell[0] < self.height and 0 <= cell[1] < self.width
+                        and cell not in body and cell not in seen):
+                    seen.add(cell)
+                    stack.append(cell)
+        return len(seen)
+
     def step(self, direction: int) -> dict:
         """Advance one cell. Returns ``{"ate": bool, "died": bool}``."""
         if self.game_over:

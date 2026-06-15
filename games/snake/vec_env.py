@@ -1,11 +1,11 @@
 """Parallel Snake environments, one per worker process (same design as
-``tetris_rl.vec_env``): workers simulate, the main process owns the network."""
+``games.tetris.vec_env``): workers simulate, the main process owns the network."""
 
 from __future__ import annotations
 
 import multiprocessing as mp
 
-from snake_rl.env import SnakeEnv
+from .env import SnakeEnv
 
 
 def _worker(remote, parent_remote, seed: int, width: int, height: int) -> None:
@@ -32,7 +32,8 @@ class ParallelSnake:
     def __init__(self, num_envs: int, base_seed: int = 0,
                  width: int = 12, height: int = 12):
         self.num_envs = num_envs
-        ctx = mp.get_context("fork")
+        # ponytail: fork on Linux/macOS (fast, no re-import); spawn elsewhere (Windows).
+        ctx = mp.get_context("fork" if "fork" in mp.get_all_start_methods() else "spawn")
         self._remotes = []
         self._procs = []
         for i in range(num_envs):

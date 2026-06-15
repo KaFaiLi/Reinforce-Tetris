@@ -1,7 +1,7 @@
 import numpy as np
 
-from snake_rl.env import STATE_DIM, SnakeEnv
-from snake_rl.game import DOWN, LEFT, RIGHT, UP, SnakeGame
+from games.snake.env import STATE_DIM, SnakeEnv
+from games.snake.game import DOWN, LEFT, RIGHT, UP, SnakeGame
 
 
 def test_movement_and_growth():
@@ -41,6 +41,17 @@ def test_self_collision():
     game.step(LEFT)
     events = game.step(DOWN)  # loops back into its own body
     assert events["died"]
+
+
+def test_free_space_detects_trap():
+    game = SnakeGame(seed=0, width=5, height=5)
+    # wall off a 1-cell pocket at (0,0): body along row 0 and col 0 around it
+    game.snake.clear()
+    game.snake.extend([(1, 0), (1, 1), (0, 1)])  # surrounds (0,0) with walls
+    assert game.free_space((0, 0)) == 1          # pocket: only itself
+    assert game.free_space((2, 2)) > 1           # open area: large
+    assert game.free_space((1, 1)) == 0          # into body
+    assert game.free_space((-1, 0)) == 0         # off board
 
 
 def test_env_state_shape_and_danger_flags():

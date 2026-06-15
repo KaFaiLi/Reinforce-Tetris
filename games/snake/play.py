@@ -3,7 +3,7 @@
 Controls: arrow keys steer, p pauses, q quits.
 
 Usage:
-    python play_snake.py
+    uv run python -m games.snake.play
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import curses
 import time
 
-from snake_rl.game import DOWN, LEFT, RIGHT, UP, SnakeGame
+from .game import DOWN, LEFT, RIGHT, UP, SnakeGame
 
 KEY_TO_DIR = {
     curses.KEY_UP: UP,

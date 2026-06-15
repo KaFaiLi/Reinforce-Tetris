@@ -1,10 +1,16 @@
 """RL environment over Snake with relative actions and compact features.
 
-State (11 features, the classic formulation that learns quickly on CPU):
+State (14 features):
 
     [danger_straight, danger_right, danger_left,
      dir_up, dir_right, dir_down, dir_left,
-     food_up, food_right, food_down, food_left]
+     food_up, food_right, food_down, food_left,
+     freespace_straight, freespace_right, freespace_left]
+
+The three freespace features are flood-fill reachable area (as a fraction of
+the board) from each candidate next-head. They give the agent the body/space
+awareness the classic 11-feature state lacks, so it can avoid sealing itself
+into a pocket when long (the self-trapping failure).
 
 Actions: 0 = keep going straight, 1 = turn right, 2 = turn left.
 Reward: +10 for eating, -10 for dying (or starving past the hunger limit).
@@ -14,9 +20,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from snake_rl.game import SnakeGame
+from .game import SnakeGame
 
-STATE_DIM = 11
+STATE_DIM = 14
 NUM_ACTIONS = 3
 
 # action -> change of absolute direction (mod 4): straight, right turn, left turn
@@ -41,9 +47,10 @@ class SnakeEnv:
         d = game.direction
         head_r, head_c = game.snake[0]
         food_r, food_c = game.food if game.food else (head_r, head_c)
-        dangers = [
-            game.collides(game.next_head((d + _TURN[a]) % 4)) for a in range(3)
-        ]
+        next_heads = [game.next_head((d + _TURN[a]) % 4) for a in range(3)]
+        dangers = [game.collides(h) for h in next_heads]
+        area = game.width * game.height
+        freespace = [game.free_space(h) / area for h in next_heads]
         return np.array(
             [
                 *[float(x) for x in dangers],
@@ -52,6 +59,7 @@ class SnakeEnv:
                 float(food_c > head_c),  # food right
                 float(food_r > head_r),  # food down
                 float(food_c < head_c),  # food left
+                *freespace,
             ],
             dtype=np.float32,
         )

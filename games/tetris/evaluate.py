@@ -1,8 +1,8 @@
 """Evaluate a trained checkpoint by playing greedy episodes.
 
 Usage:
-    python evaluate.py --checkpoint runs/latest/best.pt --episodes 5
-    python evaluate.py --checkpoint runs/latest/best.pt --render
+    uv run python -m games.tetris.evaluate --checkpoint runs/latest/best.pt --episodes 5
+    uv run python -m games.tetris.evaluate --checkpoint runs/latest/best.pt --render
 """
 
 from __future__ import annotations
@@ -13,9 +13,9 @@ import time
 import numpy as np
 import torch
 
-from tetris_rl.env import TetrisPlacementEnv
-from tetris_rl.game import render_board
-from tetris_rl.model import load_checkpoint
+from .env import TetrisPlacementEnv
+from .game import render_board
+from .model import load_checkpoint
 
 
 def parse_args() -> argparse.Namespace:

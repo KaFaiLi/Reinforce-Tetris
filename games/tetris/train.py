@@ -11,7 +11,7 @@ Each global step places one piece in every parallel environment:
        V(s'_t) -> r_t + gamma * V(s'_{t+1})
 
 Usage:
-    python train.py --workers 4 --total-pieces 200000
+    uv run python -m games.tetris.train --workers 4 --total-pieces 200000
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from tetris_rl.env import FEATURE_DIM
-from tetris_rl.model import ValueNet, save_checkpoint
-from tetris_rl.replay import ReplayBuffer
-from tetris_rl.vec_env import ParallelTetris
+from .env import FEATURE_DIM
+from .model import ValueNet, save_checkpoint
+from .replay import ReplayBuffer
+from .vec_env import ParallelTetris
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,6 +51,8 @@ def parse_args() -> argparse.Namespace:
                    help="fraction of total steps over which epsilon decays")
     p.add_argument("--game-over-penalty", type=float, default=-5.0)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--device", type=str, default="auto",
+                   help="auto|cpu|cuda (auto falls back to cpu if no cuda)")
     p.add_argument("--out-dir", type=str, default="runs/latest")
     p.add_argument("--log-every", type=int, default=500,
                    help="global steps between progress prints")
@@ -65,7 +67,12 @@ def main() -> None:
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
 
-    model = ValueNet()
+    device = torch.device(
+        "cuda" if (args.device in ("auto", "cuda") and torch.cuda.is_available())
+        else "cpu"
+    )
+    print(f"device: {device}", flush=True)
+    model = ValueNet().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_fn = nn.MSELoss()
     buffer = ReplayBuffer(args.buffer_size, rng=rng)
@@ -97,7 +104,7 @@ def main() -> None:
         # Batched value estimates for every candidate of every env.
         flat = np.concatenate(candidates, axis=0)
         with torch.no_grad():
-            values = model(torch.from_numpy(flat)).numpy()
+            values = model(torch.from_numpy(flat).to(device)).cpu().numpy()
         actions = []
         chosen_feats = []
         offset = 0
@@ -137,11 +144,11 @@ def main() -> None:
         if len(buffer) >= args.warmup:
             states, rewards, next_states, dones = buffer.sample(args.batch_size)
             with torch.no_grad():
-                next_values = model(torch.from_numpy(next_states))
-                targets = torch.from_numpy(rewards) + args.gamma * next_values * (
-                    1.0 - torch.from_numpy(dones)
+                next_values = model(torch.from_numpy(next_states).to(device))
+                targets = torch.from_numpy(rewards).to(device) + args.gamma * next_values * (
+                    1.0 - torch.from_numpy(dones).to(device)
                 )
-            predictions = model(torch.from_numpy(states))
+            predictions = model(torch.from_numpy(states).to(device))
             loss = loss_fn(predictions, targets)
             optimizer.zero_grad()
             loss.backward()

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from tetris_rl.game import (
+from .game import (
     BOARD_WIDTH,
     TetrisGame,
     bumpiness,

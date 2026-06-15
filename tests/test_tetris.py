@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from tetris_rl.env import TetrisPlacementEnv, board_features
-from tetris_rl.game import (
+from games.tetris.env import TetrisPlacementEnv, board_features
+from games.tetris.game import (
     BOARD_HEIGHT,
     BOARD_WIDTH,
     PIECE_ROTATIONS,

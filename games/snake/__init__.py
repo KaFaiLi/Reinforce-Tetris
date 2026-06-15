@@ -1,6 +1,6 @@
 """Snake reinforcement learning package."""
 
-from snake_rl.game import SnakeGame
-from snake_rl.env import SnakeEnv
+from .game import SnakeGame
+from .env import SnakeEnv
 
 __all__ = ["SnakeGame", "SnakeEnv"]

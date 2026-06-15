@@ -1,0 +1,23 @@
+[project]
+name = "reinforce-tetris"
+version = "0.1.0"
+description = "Reinforcement-learning demos: Tetris and Snake agents trained from scratch, playable and viewable in a web UI."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.24",
+    "torch>=2.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=7.0"]
+
+# CUDA build of torch (GTX 1660 super = compute 7.5). Remove this block + run
+# `uv sync` to fall back to the CPU wheel.
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true

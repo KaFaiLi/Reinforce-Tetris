@@ -1,8 +1,8 @@
 """Evaluate a trained Snake checkpoint with greedy play.
 
 Usage:
-    python evaluate_snake.py --checkpoint runs/snake/best.pt --episodes 20
-    python evaluate_snake.py --checkpoint runs/snake/best.pt --render
+    uv run python -m games.snake.evaluate --checkpoint runs/snake/best.pt --episodes 20
+    uv run python -m games.snake.evaluate --checkpoint runs/snake/best.pt --render
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ import time
 import numpy as np
 import torch
 
-from snake_rl.env import SnakeEnv
-from snake_rl.model import load_checkpoint
+from .env import SnakeEnv
+from .model import load_checkpoint
 
 
 def render(env: SnakeEnv) -> str:

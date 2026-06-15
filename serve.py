@@ -4,7 +4,7 @@ Runs the game and model server-side and exposes a small JSON API consumed by
 ``webui/index.html``. No dependencies beyond the training stack.
 
 Usage:
-    python serve.py --checkpoint runs/latest/best.pt --port 8000
+    uv run python serve.py --checkpoint runs/latest/best.pt --port 8000
     # then open http://localhost:8000
 """
 
@@ -21,11 +21,11 @@ import numpy as np
 import torch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from snake_rl.env import SnakeEnv
-from snake_rl.model import load_checkpoint as load_snake_checkpoint
-from tetris_rl.env import TetrisPlacementEnv
-from tetris_rl.game import PIECE_IDS, PIECE_ROTATIONS
-from tetris_rl.model import load_checkpoint
+from games.snake.env import SnakeEnv
+from games.snake.model import load_checkpoint as load_snake_checkpoint
+from games.tetris.env import TetrisPlacementEnv
+from games.tetris.game import PIECE_IDS, PIECE_ROTATIONS
+from games.tetris.model import load_checkpoint
 
 WEBUI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webui")
 
@@ -432,7 +432,7 @@ def main() -> None:
         SNAKE.load(snake_found[0])
         print(f"loaded snake checkpoint {snake_found[0]}")
     else:
-        print("no snake checkpoint found - train one with train_snake.py")
+        print("no snake checkpoint found - train one with `uv run python -m games.snake.train`")
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Agent UI on http://{args.host}:{args.port}  "

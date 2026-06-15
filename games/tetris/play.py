@@ -10,7 +10,7 @@ Controls:
     q                  quit
 
 Usage:
-    python play.py
+    uv run python -m games.tetris.play
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from __future__ import annotations
 import curses
 import time
 
-from tetris_rl.game import (
+from .game import (
     BOARD_HEIGHT,
     BOARD_WIDTH,
     PIECE_IDS,
